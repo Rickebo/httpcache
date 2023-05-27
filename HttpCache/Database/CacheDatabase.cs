@@ -2,26 +2,31 @@
 using System.Text;
 using System.Text.Json;
 using HttpCache.Data;
+using Microsoft.AspNetCore.Mvc;
 
 namespace HttpCache.Database;
 
 public abstract class CacheDatabase : ICacheDatabase
 {
-    private static readonly HashSet<string> IgnoredHeaders = new()
+    protected CacheSettings CacheSettings { get; }
+    private HashSet<string> _ignoredHeaders { get; }
+
+    public CacheDatabase(CacheSettings settings)
     {
-        "traceparent"
-    };
+        CacheSettings = settings;
+        _ignoredHeaders = settings.IgnoredHeaders;
+    }
 
-    public abstract Task<Response?> TryGetValue(HttpRequestMessage request);
-    public abstract Task SetValue(HttpRequestMessage request, Response response, TimeSpan? maxAge);
+    public abstract Task<Response?> TryGetValue(string request);
+    public abstract Task SetValue(string request, Response response, TimeSpan? maxAge);
 
-    protected async Task<string> SerializeMessage(HttpRequestMessage message, JsonSerializerOptions? options = null)
+    public async Task<string> SerializeKey(HttpRequestMessage message, JsonSerializerOptions? jsonOptions = null)
     {
         var dict = new Dictionary<string, object?>()
         {
             ["Content"] = await ReadContentAsBase64(message),
             ["Headers"] = message.Headers
-                .Where(entry => !IgnoredHeaders.Contains(entry.Key))
+                .Where(entry => !_ignoredHeaders.Contains(entry.Key))
                 .ToDictionary(
                     x => x.Key,
                     x => x.Value
@@ -34,7 +39,7 @@ public abstract class CacheDatabase : ICacheDatabase
             ["Version"] = message.Version.ToString()
         };
 
-        return JsonSerializer.Serialize(dict, options);
+        return JsonSerializer.Serialize(dict, options: jsonOptions);
     }
 
     private async Task<string?> ReadContentAsBase64(HttpRequestMessage message)

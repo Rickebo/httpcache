@@ -1,0 +1,17 @@
+version: "3"
+services:
+  redis:
+    image: redis
+    volumes:
+      - redis_data:/data
+  httpcache:
+    image: ghcr.io/rickebo/httpcache
+    restart: unless-stopped
+    volumes:
+      - ./appsettings-example.json:/app/appsettings.json
+    ports:
+      - 80:80
+    depends_on:
+      - redis
+volumes:
+  redis_data:

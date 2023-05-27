@@ -10,7 +10,8 @@ public class RedisCacheDatabase : CacheDatabase
     private readonly ConnectionMultiplexer _redis;
     private readonly IDatabase _db;
 
-    public RedisCacheDatabase(RedisSettings settings)
+    public RedisCacheDatabase(CacheSettings cacheSettings, RedisSettings settings)
+        : base(cacheSettings)
     {
         _settings = settings;
         _redis = ConnectionMultiplexer.Connect(
@@ -31,10 +32,9 @@ public class RedisCacheDatabase : CacheDatabase
     }
 
     public override async Task<Response?> TryGetValue(
-        HttpRequestMessage request
+        string key
     )
     {
-        var key = await SerializeMessage(request);
         var serializedResponse = await _db.StringGetAsync(key);
         return !serializedResponse.IsNullOrEmpty
             ? DeserializeResponse(serializedResponse.ToString())
@@ -42,18 +42,17 @@ public class RedisCacheDatabase : CacheDatabase
     }
 
     public override async Task SetValue(
-        HttpRequestMessage request,
+        string key,
         Response response,
         TimeSpan? maxAge
     )
     {
-        var key = await SerializeMessage(request);
         var value = SerializeResponse(response);
         
         await _db.StringSetAsync(
             key: new RedisKey(key),
             value: new RedisValue(value),
-            expiry: maxAge
+            expiry: maxAge ?? CacheSettings.DefaultMaxAge
         );
     }
 

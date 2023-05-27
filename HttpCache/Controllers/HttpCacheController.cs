@@ -55,9 +55,11 @@ public class HttpCacheController : ControllerBase
             return;
 
         var message = ConstructMessage(Request);
+        var messageKey = await _database.SerializeKey(message);
+        var requestUri = message.RequestUri;
 
         dbSw.Start();
-        var cachedResponse = await _database.TryGetValue(message);
+        var cachedResponse = await _database.TryGetValue(messageKey);
         dbSw.Stop();
 
         if (cachedResponse != null)
@@ -83,7 +85,7 @@ public class HttpCacheController : ControllerBase
         var response = await ConstructResponse(responseMessage);
 
         dbSw.Start();
-        await _database.SetValue(message, response, maxAge);
+        await _database.SetValue(messageKey, response, maxAge);
         dbSw.Stop();
 
         await RespondWith(response, Response);
@@ -275,7 +277,9 @@ public class HttpCacheController : ControllerBase
                     new StringValues(header.Value.ToArray())
                 );
 
-        await response.Body.WriteAsync(message.Content);
+
+        await response.BodyWriter.WriteAsync(message.Content);
+        await response.BodyWriter.FlushAsync();
 
         foreach (var header in message.TrailingHeaders)
             response.AppendTrailer(

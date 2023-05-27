@@ -1,9 +1,12 @@
 ﻿using HttpCache.Settings;
+using Microsoft.AspNetCore.Mvc.Formatters.Xml;
 
 public class CacheSettings : ISettings
 {
     public const string Name = "Cache";
     public string SectionName => Name;
+
+    public static readonly CacheSettings Default = new();
 
     /// <summary>
     /// The default max age to keep an item in the cache for. If null, the max age will be determined by the caching
@@ -21,4 +24,5 @@ public class CacheSettings : ISettings
     {
         "traceparent"
     };
+
 }

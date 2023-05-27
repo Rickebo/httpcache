@@ -13,6 +13,7 @@ public static class Startup
     public static IServiceCollection AddHttpCache(this IServiceCollection services) =>
         services
             .AddSettings(() => HttpSettings.Default)
+            .AddSettings(() => CacheSettings.Default)
             .AddRedis();
 
     public static IServiceCollection AddRedis(this IServiceCollection services) =>
