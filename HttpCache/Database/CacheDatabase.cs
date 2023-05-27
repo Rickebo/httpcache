@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using HttpCache.Data;
+using HttpCache.Extensions;
 using Microsoft.AspNetCore.Mvc;
 
 namespace HttpCache.Database;
@@ -51,16 +52,7 @@ public abstract class CacheDatabase : ICacheDatabase
 
         var contentStream = await task;
 
-        return await ReadAsBase64(contentStream);
-    }
-
-    private async Task<string> ReadAsBase64(Stream stream)
-    {
-        var ms = new MemoryStream();
-        await stream.CopyToAsync(ms);
-        var bytes = ms.ToArray();
-
-        return Convert.ToBase64String(bytes);
+        return await contentStream.ToBase64();
     }
 
     public Response DeserializeResponse(string json) =>

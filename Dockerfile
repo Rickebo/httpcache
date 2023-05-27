@@ -6,7 +6,9 @@ EXPOSE 443
 FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build
 WORKDIR /src
 COPY ["HttpCache/HttpCache.csproj", "HttpCache/"]
+COPY ["HttpCache.Data/HttpCache.Data.csproj", "HttpCache.Data/"]
 RUN dotnet restore "HttpCache/HttpCache.csproj"
+RUN dotnet restore "HttpCache.Data/HttpCache.Data.csproj"
 COPY . .
 WORKDIR "/src/HttpCache"
 RUN dotnet build "HttpCache.csproj" -c Release -o /app/build

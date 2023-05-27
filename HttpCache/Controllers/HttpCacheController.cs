@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using HttpCache.Data;
 using HttpCache.Database;
+using HttpCache.Services;
 using HttpCache.Settings;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Primitives;
@@ -13,10 +14,12 @@ namespace HttpCache.Controllers;
 
 public class HttpCacheController : ControllerBase
 {
+    private const string TotalTime = "total";
+    private const string DbTime = "db";
+
     private readonly ILogger<HttpCacheController> _logger;
-    private readonly ICacheDatabase _database;
+    private readonly RequestHandler _handler;
     private readonly HttpSettings _settings;
-    private readonly HttpClient _client = new();
 
     private readonly HttpAccessSettings _accessSettings;
 
@@ -28,14 +31,13 @@ public class HttpCacheController : ControllerBase
 
     public HttpCacheController(
         ILogger<HttpCacheController> logger,
-        ICacheDatabase database,
+        RequestHandler handler,
         HttpSettings settings
     )
     {
         _logger = logger;
-        _database = database;
+        _handler = handler;
         _settings = settings;
-        _client.DefaultRequestHeaders.Clear();
 
         _accessSettings = _settings.Access;
         _blacklistedRanges = settings.GetBlacklistedRanges();
@@ -46,66 +48,44 @@ public class HttpCacheController : ControllerBase
 
     public async Task HandleRequest(TimeSpan? maxAge = null)
     {
-        var sw = new Stopwatch();
-        var dbSw = new Stopwatch();
-
-        sw.Start();
+        var perfMon = new PerformanceMonitor();
+        perfMon.Start(TotalTime);
 
         if (!Validate(Request))
             return;
 
         var message = ConstructMessage(Request);
-        var messageKey = await _database.SerializeKey(message);
+
         var requestUri = message.RequestUri;
+        var result = await _handler.HandleMessage(message, perfMon);
 
-        dbSw.Start();
-        var cachedResponse = await _database.TryGetValue(messageKey);
-        dbSw.Stop();
-
-        if (cachedResponse != null)
-        {
-            await RespondWith(cachedResponse, Response);
-            await Response.CompleteAsync();
-
-            sw.Stop();
-            dbSw.Stop();
-            _logger.LogInformation(
-                "Handled {Cached} request in {Elapsed} ms, with {ElapsedDb} ms of DB delay " +
-                "with destination: {Destination}",
-                "cached",
-                sw.ElapsedMilliseconds,
-                dbSw.ElapsedMilliseconds,
-                message.RequestUri.ToString()
-            );
-            
-            return;
-        }
-
-        var responseMessage = await _client.SendAsync(message);
-        var response = await ConstructResponse(responseMessage);
-
-        dbSw.Start();
-        await _database.SetValue(messageKey, response, maxAge);
-        dbSw.Stop();
-
-        await RespondWith(response, Response);
-        sw.Stop();
+        await RespondWith(result.Response, Response);
+        await Response.CompleteAsync();
+        perfMon.Stop(TotalTime);
 
         _logger.LogInformation(
             "Handled {Cached} request in {Elapsed} ms, with {ElapsedDb} ms of DB delay " +
             "with destination: {Destination}",
-            "non-cached",
-            sw.ElapsedMilliseconds,
-            dbSw.ElapsedMilliseconds,
-            message.RequestUri.ToString()
+            result.IsCached 
+                ? "cached" 
+                : "non-cached",
+            perfMon.GetElapsed(TotalTime).TotalMilliseconds,
+            perfMon.GetElapsed(DbTime).TotalMilliseconds,
+            requestUri?.ToString() ?? "<unknown>"
         );
     }
 
+
     private bool Validate(HttpRequest request)
     {
-        var hostIps = GetActualHostIp(Request, out var host);
+        var hostIps = GetActualHostIp(request, out var host);
         var sourceIp = GetSourceIp(request);
 
+        return Validate(sourceIp ?? IPAddress.None, hostIps, host);
+    }
+
+    private bool Validate(IPAddress sourceIp, IPAddress[] hostIps, string host)
+    {
         if (_accessSettings.BlacklistHosts && _blacklistedHosts.Contains(host))
         {
             _logger.LogWarning(
@@ -230,33 +210,6 @@ public class HttpCacheController : ControllerBase
         }
 
         return message;
-    }
-
-    [NonAction]
-    private async Task<Response> ConstructResponse(HttpResponseMessage responseMessage)
-    {
-        var contentStream = await responseMessage.Content.ReadAsStreamAsync();
-        var ms = new MemoryStream();
-
-        await contentStream.CopyToAsync(ms);
-
-        return new Response()
-        {
-            Content = ms.ToArray(),
-            StatusCode = (HttpStatusCode)responseMessage.StatusCode,
-            Headers = responseMessage.Headers.ToDictionary(
-                x => x.Key,
-                x => x.Value.ToArray()
-            ),
-            ContentHeaders = responseMessage.Content?.Headers?.ToDictionary(
-                x => x.Key,
-                x => x.Value.ToArray()
-            ),
-            TrailingHeaders = responseMessage.TrailingHeaders?.ToDictionary(
-                x => x.Key,
-                x => x.Value.ToArray()
-            ) ?? new()
-        };
     }
 
     [NonAction]

@@ -1,3 +1,4 @@
+using HttpCache.Settings;
 using static HttpCache.Startup;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -7,6 +8,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services
     .AddHttpCache()
     .AddControllers();
+
+if (builder.Configuration.GetSettings<PulsarSettings>()?.Enabled ?? false)
+    builder.Services.AddPulsar();
 
 var app = builder.Build();
 

@@ -1,4 +1,5 @@
 ﻿using HttpCache.Database;
+using HttpCache.Services;
 using HttpCache.Settings;
 
 namespace HttpCache;
@@ -14,6 +15,8 @@ public static class Startup
         services
             .AddSettings(() => HttpSettings.Default)
             .AddSettings(() => CacheSettings.Default)
+            .AddSettings(() => PulsarSettings.Default)
+            .AddSingleton<RequestHandler>()
             .AddRedis();
 
     public static IServiceCollection AddRedis(this IServiceCollection services) =>
@@ -21,13 +24,23 @@ public static class Startup
             .AddRequiredSettings<RedisSettings>()
             .AddSingleton<ICacheDatabase, RedisCacheDatabase>();
 
+    public static IServiceCollection AddPulsar(this IServiceCollection services) =>
+        services
+            .AddRequiredSettings<PulsarSettings>()
+            .AddHostedService<PulsarRequestConsumer>();
+
     public static IServiceCollection AddRequiredSettings<T>(
         this IServiceCollection collection
     ) where T : class, ISettings, new() => collection.AddSettings<T>(
         defaultValueFactory: () => throw new Exception(
             $"Could not find required settings section {GetSettingsName<T>()}"
-            )
+        )
     );
+
+    public static T? GetSettings<T>(this IConfiguration configuration) where T : class, ISettings, new() =>
+        configuration
+            .GetSection(GetSettingsName<T>())
+            .Get<T>();
 
     public static IServiceCollection AddSettings<T>(
         this IServiceCollection collection,
@@ -39,8 +52,7 @@ public static class Startup
                 GetOrDefault(
                     provider
                         .GetRequiredService<IConfiguration>()
-                        .GetSection(GetSettingsName<T>())
-                        .Get<T>(),
+                        .GetSettings<T>(),
                     defaultValueFactory
                 )
             );
