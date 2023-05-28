@@ -11,6 +11,7 @@ builder.Services
 
 if (builder.Configuration.GetSettings<PulsarSettings>()?.Enabled ?? false)
     builder.Services.AddPulsar();
+    
 
 var app = builder.Build();
 

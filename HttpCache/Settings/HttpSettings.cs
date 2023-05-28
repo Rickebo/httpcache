@@ -36,6 +36,16 @@ public class HttpSettings : ISettings
         "fe80::/10"
     };
 
+    /// <summary>
+    /// List of headers removed from proxied result before returning to client. Useful to remove headers that would,
+    /// for example, interfere with how the proxy responds to requests.
+    /// </summary>
+    public HashSet<string> FilteredHeaders { get; set; } = 
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Transfer-Encoding"
+    };
+
 
     /// <summary>
     /// Set of hostnames to blacklist if access settings specify that host blacklisting should be used.
