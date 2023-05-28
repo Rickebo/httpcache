@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using HttpCache.Data;
 using HttpCache.Database;
+using HttpCache.Extensions;
 using HttpCache.Settings;
 
 namespace HttpCache.Services;
@@ -67,24 +68,31 @@ public class RequestHandler
         );
     }
 
-    private HttpRequestMessage ConstructMessage(Request request)
+    private HttpRequestMessage ConstructMessage(Request request, bool uriIsHost = true)
     {
         var method = request.Method;
         var headers = request.Headers;
-        var hostHeader = headers[_settings.HostHeader];
 
-        if (hostHeader.Length != 1 || hostHeader[0] == null)
-            throw new Exception("Invalid actual host header specified.");
-
-        var actualHost = new Uri(hostHeader[0]!);
         var actualMethod = new HttpMethod(method);
 
-        var message = new HttpRequestMessage(actualMethod, actualHost)
+        var message = new HttpRequestMessage(actualMethod, request.Url)
         {
             Content = request.Content != null
-                ? new StreamContent(new MemoryStream(request.Content))
+                ? new ByteArrayContent(request.Content)
                 : null
         };
+
+        if (message.Content != null && request.ContentHeaders != null)
+            foreach (var entry in request.ContentHeaders)
+            {
+                var name = entry.Key;
+                var values = entry.Value;
+
+                if (name == _settings.HostHeader || name == "Host")
+                    continue;
+
+                message.Content.Headers.TryAddWithoutValidation(name, (IEnumerable<string?>)values);
+            }
 
         foreach (var entry in headers)
         {
@@ -94,7 +102,7 @@ public class RequestHandler
             if (name == _settings.HostHeader || name == "Host")
                 continue;
 
-            message.Headers.Add(name, (IEnumerable<string?>)values);
+            message.TryAddHeader(name, values);
         }
 
         return message;

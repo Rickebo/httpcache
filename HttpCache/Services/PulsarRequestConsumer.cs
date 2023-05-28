@@ -30,9 +30,78 @@ public class PulsarRequestConsumer : IHostedService
         _logger = logger;
         _settings = settings;
         _handler = handler;
+
+        _logger.LogInformation("Initializing Pulsar request consumer with service URL {Url}.", settings.Url);
+
         _client = PulsarClient.Builder()
             .ServiceUrl(new Uri(settings.Url))
             .Build();
+    }
+
+    private async ValueTask MonitorConsumer<T>(
+        IConsumer<T> consumer,
+        CancellationToken cancellationToken
+    )
+    {
+        var state = ConsumerState.Disconnected;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            state = (await consumer.StateChangedFrom(state, cancellationToken)).ConsumerState;
+
+            var stateMessage = state switch
+            {
+                ConsumerState.Active => "active",
+                ConsumerState.Inactive => "inactive",
+                ConsumerState.Disconnected => "disconnected",
+                ConsumerState.Closed => "closed",
+                ConsumerState.ReachedEndOfTopic => "at end of topic",
+                ConsumerState.Faulted => "faulted",
+                ConsumerState.Unsubscribed => "unsubscribed",
+                _ => $"of unknown state '{state}'"
+            };
+
+            _logger.LogDebug(
+                "Consumer on topic {Topic} is now {State}.",
+                consumer.Topic,
+                stateMessage
+            );
+
+            if (consumer.IsFinalState(state))
+                return;
+        }
+    }
+
+    private async ValueTask MonitorProducer<T>(
+        IProducer<T> producer,
+        CancellationToken cancellationToken
+    )
+    {
+        var state = ProducerState.Disconnected;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            state = (await producer.StateChangedFrom(state, cancellationToken)).ProducerState;
+
+            var stateMessage = state switch
+            {
+                ProducerState.Connected => "connected",
+                ProducerState.Disconnected => "disconnected",
+                ProducerState.Closed => "closed",
+                ProducerState.Faulted => "faulted",
+                ProducerState.PartiallyConnected => "partially connected",
+                _ => $"of unknown state '{state}'"
+            };
+
+            _logger.LogDebug(
+                "Producer on topic {Topic} is now {State}.",
+                producer.Topic,
+                stateMessage
+            );
+
+            if (producer.IsFinalState(state))
+                return;
+        }
     }
 
     #region IHostedService
@@ -42,6 +111,8 @@ public class PulsarRequestConsumer : IHostedService
         if (_tasks != null)
             throw new InvalidOperationException("Cannot start request consumer when its already running.");
 
+        _logger.LogInformation("Starting Pulsar request consumer workers...");
+
         try
         {
             _cancellationTokenSource = new CancellationTokenSource();
@@ -50,7 +121,7 @@ public class PulsarRequestConsumer : IHostedService
             _tasks = Enumerable
                 .Range(0, _settings.Concurrency)
                 .Select(_ => Task.Run(
-                        () => DoWork(token),
+                        async () => await DoWork(token),
                         cancellationToken
                     )
                 )
@@ -115,32 +186,50 @@ public class PulsarRequestConsumer : IHostedService
             var producer = CreateProducer<Response>(
                 topic: _settings.OutputTopic
             );
-            
-            await foreach (var message in consumer.Messages(cancellationToken))
+
+            Task.Run(async () => await MonitorConsumer(consumer, cancellationToken));
+            Task.Run(async () => await MonitorProducer(producer, cancellationToken));
+
+            while (!cancellationToken.IsCancellationRequested)
             {
+                var message = await consumer.Receive(cancellationToken);
                 monitor.ResetAll();
-
-                var request = message.Value();
-
-                var result = await _handler.HandleMessage(
-                    request,
-                    monitor
-                );
-
-                var response = result.Response;
+                monitor.Start(Constants.TotalTime);
                 
-                _logger.LogInformation(
-                    "Handled {Cached} pulsar request in {Elapsed} ms, with {ElapsedDb} ms of DB delay " +
-                    "with destination: {Destination}",
-                    result.IsCached
-                        ? "cached"
-                        : "non-cached",
-                    monitor.GetElapsed(Constants.TotalTime).TotalMilliseconds,
-                    monitor.GetElapsed(Constants.DatabaseTime).TotalMilliseconds,
-                    request.Url ?? "<unknown>"
-                );
+                try
+                {
+                    var request = message.Value();
 
-                await producer.Send(response, cancellationToken);
+                    var result = await _handler.HandleMessage(
+                        request,
+                        monitor
+                    );
+
+                    var response = result.Response;
+                    monitor.Stop(Constants.TotalTime);
+
+                    _logger.LogInformation(
+                        "Handled {Cached} pulsar request in {Elapsed} ms, with {ElapsedDb} ms of DB delay " +
+                        "with destination: {Destination}",
+                        result.IsCached
+                            ? "cached"
+                            : "non-cached",
+                        monitor.GetElapsed(Constants.TotalTime).TotalMilliseconds,
+                        monitor.GetElapsed(Constants.DatabaseTime).TotalMilliseconds,
+                        request.Url ?? "<unknown>"
+                    );
+
+                    await consumer.Acknowledge(message, cancellationToken);
+                    await producer.Send(response, cancellationToken);
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(
+                        e,
+                        "An exception occurred while handling a pulsar request."
+                        );
+                }
+                
             }
         }
         finally

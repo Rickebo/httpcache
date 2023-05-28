@@ -54,6 +54,9 @@ Contains HTTP-specific settings that determine how the proxy handles HTTP reques
 - ``WhitelistedIp`` a list of IP address ranges that the proxy will forward requests to. If all of the IP addresses
   a domain resolves to is whitelisted, it will be proxied.
 - ``WhitelistedHost`` a list of hostnames that the proxy will forward requests to.
+- ``FilteredHeaders`` a list of headers excluded from the response to the client. Is useful to exclude headers that
+  would otherwise interfere with the proxy's response, such as ``Transfer-Encoding``. Default value only excludes
+  ``Transfer-Encoding``.
 
 By default, ``BlacklistedIp`` contains the following address ranges:
 - ``10.0.0.0/8``

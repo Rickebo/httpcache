@@ -1,8 +1,10 @@
 ﻿using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Web;
 using HttpCache.Data;
 using HttpCache.Database;
+using HttpCache.Extensions;
 using HttpCache.Services;
 using HttpCache.Settings;
 using Microsoft.AspNetCore.Mvc;
@@ -14,9 +16,6 @@ namespace HttpCache.Controllers;
 
 public class HttpCacheController : ControllerBase
 {
-    private const string TotalTime = "total";
-    private const string DbTime = "db";
-
     private readonly ILogger<HttpCacheController> _logger;
     private readonly RequestHandler _handler;
     private readonly HttpSettings _settings;
@@ -28,6 +27,8 @@ public class HttpCacheController : ControllerBase
 
     private readonly HashSet<string> _blacklistedHosts;
     private readonly HashSet<string> _whitelistedHosts;
+
+    private readonly HashSet<string> _filteredHeaders;
 
     public HttpCacheController(
         ILogger<HttpCacheController> logger,
@@ -44,24 +45,28 @@ public class HttpCacheController : ControllerBase
         _whitelistedRanges = settings.GetWhitelistedRanges();
         _blacklistedHosts = settings.GetBlacklistedHosts();
         _whitelistedHosts = settings.GetWhitelistedHosts();
+
+        _filteredHeaders = _settings.FilteredHeaders;
+
+        _logger.LogInformation("Initializing HTTP cache controller.");
     }
 
     public async Task HandleRequest(TimeSpan? maxAge = null)
     {
         var perfMon = new PerformanceMonitor();
-        perfMon.Start(TotalTime);
+        perfMon.Start(Constants.TotalTime);
 
         if (!Validate(Request))
             return;
 
-        var message = ConstructMessage(Request);
+        var message = await ConstructMessage(Request);
 
         var requestUri = message.RequestUri;
         var result = await _handler.HandleMessage(message, perfMon);
 
         await RespondWith(result.Response, Response);
         await Response.CompleteAsync();
-        perfMon.Stop(TotalTime);
+        perfMon.Stop(Constants.TotalTime);
 
         _logger.LogInformation(
             "Handled {Cached} request in {Elapsed} ms, with {ElapsedDb} ms of DB delay " +
@@ -69,8 +74,8 @@ public class HttpCacheController : ControllerBase
             result.IsCached 
                 ? "cached" 
                 : "non-cached",
-            perfMon.GetElapsed(TotalTime).TotalMilliseconds,
-            perfMon.GetElapsed(DbTime).TotalMilliseconds,
+            perfMon.GetElapsed(Constants.TotalTime).TotalMilliseconds,
+            perfMon.GetElapsed(Constants.DatabaseTime).TotalMilliseconds,
             requestUri?.ToString() ?? "<unknown>"
         );
     }
@@ -172,7 +177,7 @@ public class HttpCacheController : ControllerBase
     }
 
     [NonAction]
-    private HttpRequestMessage ConstructMessage(HttpRequest request)
+    private async Task<HttpRequestMessage> ConstructMessage(HttpRequest request)
     {
         var method = request.Method;
         var headers = request.Headers;
@@ -184,6 +189,15 @@ public class HttpCacheController : ControllerBase
         var actualHost = new Uri(hostHeader[0]!);
         var actualMethod = new System.Net.Http.HttpMethod(method);
 
+        byte[]? contentBytes = null;
+
+        if (request.Body != null && request.Body.CanRead)
+        {
+            var ms = new MemoryStream();
+            await request.Body.CopyToAsync(ms);
+            contentBytes = ms.ToArray();
+        }
+        
         var message = new HttpRequestMessage(actualMethod, actualHost)
         {
             Version = request.Protocol switch
@@ -193,8 +207,8 @@ public class HttpCacheController : ControllerBase
                 "HTTP/2.0" => HttpVersion.Version20,
                 _ => throw new ArgumentOutOfRangeException()
             },
-            Content = request.ContentType != null
-                ? new StreamContent(request.Body)
+            Content = contentBytes != null
+                ? new ByteArrayContent(contentBytes)
                 : null
         };
 
@@ -206,38 +220,51 @@ public class HttpCacheController : ControllerBase
             if (name == _settings.HostHeader || name == "Host")
                 continue;
 
-            message.Headers.Add(name, (IEnumerable<string?>)values);
+            message.TryAddHeader(name, values);
         }
 
         return message;
     }
+
+    private IEnumerable<KeyValuePair<string, string[]>> FilterHeaders(
+        IEnumerable<KeyValuePair<string, string[]>> headers
+    ) => headers.Where(header => !_settings.FilteredHeaders.Contains(header.Key));
 
     [NonAction]
     private async Task RespondWith(Response message, HttpResponse response)
     {
         response.StatusCode = (int)message.StatusCode;
 
-        foreach (var header in message.Headers)
+        foreach (var header in FilterHeaders(message.Headers))
             response.Headers.Add(
-                header.Key,
-                new StringValues(header.Value.ToArray())
+                HttpUtility.UrlEncode(header.Key),
+                new StringValues(header.Value
+                    .Select(HttpUtility.UrlEncode)
+                    .ToArray()
+                )
             );
 
         if (message.ContentHeaders != null)
-            foreach (var header in message.ContentHeaders)
+            foreach (var header in FilterHeaders(message.ContentHeaders))
                 response.Headers.Add(
-                    header.Key,
-                    new StringValues(header.Value.ToArray())
+                    HttpUtility.UrlEncode(header.Key),
+                    new StringValues(header.Value
+                        .Select(HttpUtility.UrlEncode)
+                        .ToArray()
+                    )
                 );
 
 
         await response.BodyWriter.WriteAsync(message.Content);
         await response.BodyWriter.FlushAsync();
 
-        foreach (var header in message.TrailingHeaders)
+        foreach (var header in FilterHeaders(message.TrailingHeaders))
             response.AppendTrailer(
-                header.Key,
-                new StringValues(header.Value.ToArray())
+                HttpUtility.UrlEncode(header.Key),
+                new StringValues(header.Value
+                    .Select(HttpUtility.UrlEncode)
+                    .ToArray()
+                )
             );
     }
 }
