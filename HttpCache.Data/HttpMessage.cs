@@ -4,6 +4,7 @@ namespace HttpCache.Data;
 
 public class HttpMessage
 {
+    public Guid MessageId { get; set; } 
     public Dictionary<string, string[]> Headers { get; set; } = new();
     public Dictionary<string, string[]>? ContentHeaders { get; set; } = new();
     public Dictionary<string, string[]> TrailingHeaders { get; set; } = new();
