@@ -220,7 +220,7 @@ public class PulsarRequestConsumer : IHostedService
                     );
 
                     await consumer.Acknowledge(message, cancellationToken);
-                    await producer.Send(response, cancellationToken);
+                    producer.Send(response, cancellationToken);
                 }
                 catch (Exception e)
                 {
