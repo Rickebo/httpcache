@@ -2,14 +2,18 @@ name: Build HttpCache
 
 on:
   push:
-    branches: [ main ]
+    branches: 
+      - main
+      - master
     paths:
       - 'HttpCache/**'
       - 'HttpCache.Data/**'
       - 'HttpCache.sln'
       - '.github/workflows/build-httpcache.yml'
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
+      - master
     paths:
       - 'HttpCache/**'
       - 'HttpCache.Data/**'
