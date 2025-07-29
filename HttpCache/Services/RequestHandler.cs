@@ -73,7 +73,7 @@ public class RequestHandler
         var method = request.Method;
         var headers = request.Headers;
 
-        var actualMethod = new HttpMethod(method);
+        var actualMethod = new HttpMethod(method ?? "GET");
 
         var message = new HttpRequestMessage(actualMethod, request.Url)
         {

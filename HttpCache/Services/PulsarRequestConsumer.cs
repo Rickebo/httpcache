@@ -187,8 +187,8 @@ public class PulsarRequestConsumer : IHostedService
                 topic: _settings.OutputTopic
             );
 
-            Task.Run(async () => await MonitorConsumer(consumer, cancellationToken));
-            Task.Run(async () => await MonitorProducer(producer, cancellationToken));
+            _ = Task.Run(async () => await MonitorConsumer(consumer, cancellationToken), cancellationToken);
+            _ = Task.Run(async () => await MonitorProducer(producer, cancellationToken), cancellationToken);
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -220,7 +220,7 @@ public class PulsarRequestConsumer : IHostedService
                     );
 
                     await consumer.Acknowledge(message, cancellationToken);
-                    producer.Send(response, cancellationToken);
+                    _ = producer.Send(response, cancellationToken);
                 }
                 catch (Exception e)
                 {
