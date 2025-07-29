@@ -220,7 +220,7 @@ public class HttpCacheController : ControllerBase
             if (name == _settings.HostHeader || name == "Host")
                 continue;
 
-            message.TryAddHeader(name, values);
+            message.TryAddHeader(name, values.Where(v => v != null).Cast<string>().ToArray());
         }
 
         return message;
@@ -236,7 +236,7 @@ public class HttpCacheController : ControllerBase
         response.StatusCode = (int)message.StatusCode;
 
         foreach (var header in FilterHeaders(message.Headers))
-            response.Headers.Add(
+            response.Headers.Append(
                 HttpUtility.UrlEncode(header.Key),
                 new StringValues(header.Value
                     .Select(HttpUtility.UrlEncode)
@@ -246,7 +246,7 @@ public class HttpCacheController : ControllerBase
 
         if (message.ContentHeaders != null)
             foreach (var header in FilterHeaders(message.ContentHeaders))
-                response.Headers.Add(
+                response.Headers.Append(
                     HttpUtility.UrlEncode(header.Key),
                     new StringValues(header.Value
                         .Select(HttpUtility.UrlEncode)
